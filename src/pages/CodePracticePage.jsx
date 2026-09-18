@@ -86,9 +86,10 @@ export default function CodePracticePage() {
 
     fetchProblem(selectedProblemId)
       .then((data) => {
-        setProblem(data.problem)
-        setCode(data.problem.starterCode[language] || '')
-        setCustomInput(data.problem.examples?.[0]?.input || '')
+        const p = data?.problem && data.problem.starterCode ? data.problem : getFallbackProblem(selectedProblemId)
+        setProblem(p)
+        setCode(p?.starterCode?.[language] || '')
+        setCustomInput(p?.examples?.[0]?.input || '')
         setRunResult(null)
         setTestResult(null)
         setExplanation(null)
@@ -97,8 +98,8 @@ export default function CodePracticePage() {
       .catch(() => {
         const fallback = getFallbackProblem(selectedProblemId)
         setProblem(fallback)
-        setCode(fallback.starterCode[language] || '')
-        setCustomInput(fallback.examples?.[0]?.input || '')
+        setCode(fallback?.starterCode?.[language] || '')
+        setCustomInput(fallback?.examples?.[0]?.input || '')
         setRunResult(null)
         setTestResult(null)
         setExplanation(null)

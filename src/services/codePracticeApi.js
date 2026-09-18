@@ -10,12 +10,22 @@ import { getAllCombinedProblems } from './adminService'
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
 async function request(path, options = {}) {
+  // If no external backend is configured and we are in production browser environment, fallback immediately
+  if (!import.meta.env.VITE_API_URL && typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+    throw new Error('Using in-browser client execution sandbox.')
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options,
   })
 
-  const data = await res.json().catch(() => ({}))
+  const contentType = res.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) {
+    throw new Error(`Expected JSON but received ${contentType}`)
+  }
+
+  const data = await res.json()
 
   if (!res.ok) {
     const errorMsg = data.error || `Server returned error (${res.status})`
@@ -160,7 +170,7 @@ export async function fetchProblems() {
   const combined = getAllCombinedProblems()
   try {
     const data = await request('/problems')
-    if (data.problems?.length > 0) {
+    if (data && Array.isArray(data.problems) && data.problems.length > 0) {
       // Merge server problems with local custom problems
       const custom = combined.filter((p) => p.isCustom)
       const serverIds = new Set(data.problems.map((p) => p.id))
@@ -179,7 +189,7 @@ export async function fetchProblem(id) {
 
   try {
     const data = await request(`/problems/${id}`)
-    if (data.problem) {
+    if (data && data.problem && data.problem.starterCode) {
       return data
     }
   } catch {}
