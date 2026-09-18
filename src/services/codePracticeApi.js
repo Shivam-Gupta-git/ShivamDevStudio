@@ -76,8 +76,8 @@ function evaluateJavaScriptInBrowser(sourceCode, stdin = '') {
 
   const startTime = performance.now()
   try {
-    // Execute safely with sandboxed parameters
-    const runner = new Function('console', 'require', 'process', 'input', sourceCode)
+    // Execute safely with sandboxed parameters (avoiding shadowing common variable names like input)
+    const runner = new Function('console', 'require', 'process', '__stdin__', sourceCode)
     runner(customConsole, customRequire, customProcess, stdin)
     const elapsed = ((performance.now() - startTime) / 1000).toFixed(3)
 
