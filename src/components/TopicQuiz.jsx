@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
   HelpCircle,
   CheckCircle2,
   XCircle,
   RotateCcw,
-  Award,
   Sparkles,
   Loader2,
   ChevronLeft,
@@ -12,9 +11,10 @@ import {
   Check,
   Clock,
   Shuffle,
-  Eye,
-  AlertTriangle,
   Trophy,
+  Target,
+  AlertCircle,
+  Award,
 } from 'lucide-react'
 import { topicQuizzes } from '../data/topicQuizzes'
 import { getCombinedTopicQuizzes } from '../services/adminService'
@@ -31,11 +31,11 @@ export default function TopicQuiz({ topicId, topicTitle }) {
   const [useAiMode, setUseAiMode] = useState(false)
 
   // Dynamic Quiz Settings
-  const [instantFeedback, setInstantFeedback] = useState(true)
   const [timerEnabled, setTimerEnabled] = useState(false)
   const [timeLeft, setTimeLeft] = useState(60) // 60-second speed test
   const [reviewIncorrectOnly, setReviewIncorrectOnly] = useState(false)
   const [shuffledQuestions, setShuffledQuestions] = useState(null)
+  const resultsRef = useRef(null)
 
   // Standard fallback questions
   const create10DefaultQuestions = (title) => [
@@ -160,7 +160,14 @@ export default function TopicQuiz({ topicId, topicTitle }) {
 
   const standard10 = get10StandardQuestions()
   const baseQuestions = useAiMode && aiQuestions?.length > 0 ? aiQuestions.slice(0, 10) : standard10
-  const activeQuestionsList = shuffledQuestions || baseQuestions
+  const rawQuestionsList = shuffledQuestions || baseQuestions
+
+  const activeQuestionsList = useMemo(() => {
+    return rawQuestionsList.map((q, idx) => ({
+      ...q,
+      originalIndex: idx,
+    }))
+  }, [rawQuestionsList])
 
   // Timer countdown
   useEffect(() => {
@@ -180,18 +187,18 @@ export default function TopicQuiz({ topicId, topicTitle }) {
   }, [timerEnabled, timeLeft, submitted, showToast])
 
   // Filter for review
-  const displayQuestions = React.useMemo(() => {
+  const displayQuestions = useMemo(() => {
     if (!reviewIncorrectOnly || !submitted) return activeQuestionsList
-    return activeQuestionsList.filter((q, idx) => selectedAnswers[idx] !== q.correct)
+    return activeQuestionsList.filter((q) => selectedAnswers[q.originalIndex] !== q.correct)
   }, [reviewIncorrectOnly, submitted, activeQuestionsList, selectedAnswers])
 
   const safeIndex = displayQuestions.length > 0 ? Math.min(currentIndex, displayQuestions.length - 1) : 0
   const currentQ = displayQuestions[safeIndex]
-  const userSel = selectedAnswers[safeIndex]
+  const userSel = currentQ ? selectedAnswers[currentQ.originalIndex] : undefined
 
   const handleSelect = (oIdx) => {
-    if (submitted) return
-    setSelectedAnswers((prev) => ({ ...prev, [safeIndex]: oIdx }))
+    if (submitted || !currentQ) return
+    setSelectedAnswers((prev) => ({ ...prev, [currentQ.originalIndex]: oIdx }))
   }
 
   const handleNext = () => {
@@ -203,8 +210,23 @@ export default function TopicQuiz({ topicId, topicTitle }) {
   }
 
   const score = Object.keys(selectedAnswers).reduce((acc, qIdx) => {
-    return selectedAnswers[qIdx] === activeQuestionsList[qIdx]?.correct ? acc + 1 : acc
+    const numericIdx = Number(qIdx)
+    return selectedAnswers[numericIdx] === activeQuestionsList[numericIdx]?.correct ? acc + 1 : acc
   }, 0)
+
+  const answeredCount = Object.keys(selectedAnswers).length
+  const totalQuestions = activeQuestionsList.length
+  const incorrectCount = answeredCount - score
+  const unattemptedCount = Math.max(0, totalQuestions - answeredCount)
+  const scorePercent = totalQuestions > 0 ? Math.round((score / totalQuestions) * 100) : 0
+
+  const handleSubmit = () => {
+    setSubmitted(true)
+    showToast(`Quiz submitted! You scored ${score}/${totalQuestions} (${scorePercent}%)`)
+    if (resultsRef.current) {
+      resultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }
 
   const handleReset = () => {
     setSelectedAnswers({})
@@ -250,9 +272,6 @@ export default function TopicQuiz({ topicId, topicTitle }) {
     }
   }
 
-  const answeredCount = Object.keys(selectedAnswers).length
-  const scorePercent = Math.round((score / (activeQuestionsList.length || 1)) * 100)
-
   return (
     <section className="space-y-4" aria-labelledby="quiz-section-title">
       {/* Header Bar */}
@@ -266,7 +285,9 @@ export default function TopicQuiz({ topicId, topicTitle }) {
               Test Your Understanding (10 Questions Drill)
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Interactive quiz with instant explanation feedback, speed timers, and AI decks.
+              {submitted
+                ? 'Review your test results, answer breakdown, and detailed explanations below.'
+                : 'Select your answers and click "Submit Quiz" to reveal your test score and explanations.'}
             </p>
           </div>
         </div>
@@ -313,79 +334,171 @@ export default function TopicQuiz({ topicId, topicTitle }) {
       {/* Dynamic Controls Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-white/50 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800/60 text-xs">
         <div className="flex flex-wrap items-center gap-2">
-          {/* Instant Feedback Toggle */}
-          <button
-            type="button"
-            onClick={() => setInstantFeedback((v) => !v)}
-            className={`inline-flex items-center gap-1 px-3 py-1 rounded-xl text-xs font-medium border transition ${
-              instantFeedback
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
-            }`}
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span>Instant Feedback: {instantFeedback ? 'ON' : 'OFF'}</span>
-          </button>
+          {/* Status Mode Badge */}
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-medium bg-purple-500/10 text-purple-600 dark:text-purple-300 border border-purple-500/20">
+            <Target className="w-3.5 h-3.5" />
+            <span>{submitted ? 'Status: Submitted & Evaluated' : 'Status: Test Drill in Progress'}</span>
+          </div>
 
           {/* Speed Timer Toggle */}
-          <button
-            type="button"
-            onClick={() => {
-              setTimerEnabled((v) => !v)
-              setTimeLeft(60)
-            }}
-            className={`inline-flex items-center gap-1 px-3 py-1 rounded-xl text-xs font-medium border transition ${
-              timerEnabled
-                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5" />
-            <span>Speed Timer (60s): {timerEnabled ? `${timeLeft}s remaining` : 'OFF'}</span>
-          </button>
+          {!submitted && (
+            <button
+              type="button"
+              onClick={() => {
+                setTimerEnabled((v) => !v)
+                setTimeLeft(60)
+              }}
+              className={`inline-flex items-center gap-1 px-3 py-1 rounded-xl text-xs font-medium border transition ${
+                timerEnabled
+                  ? 'bg-amber-500/10 text-amber-500 dark:text-amber-400 border-amber-500/30'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Speed Timer (60s): {timerEnabled ? `${timeLeft}s left` : 'OFF'}</span>
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
           <span className="font-mono text-slate-500 dark:text-slate-400">
-            Answered: {answeredCount} / {activeQuestionsList.length}
+            Answered: {answeredCount} / {totalQuestions}
           </span>
           {answeredCount > 0 && (
             <button
               type="button"
               onClick={handleReset}
-              className="text-[11px] text-slate-400 hover:text-rose-400 transition"
+              className="text-[11px] text-slate-400 hover:text-rose-400 transition flex items-center gap-1"
             >
-              Reset
+              <RotateCcw className="w-3 h-3" /> Reset
             </button>
           )}
         </div>
       </div>
 
+      {/* Test Score & Performance Summary Banner (Visible after Submit) */}
+      {submitted && (
+        <div
+          ref={resultsRef}
+          className="p-6 rounded-3xl bg-gradient-to-br from-purple-950/80 via-slate-900 to-indigo-950/80 border border-purple-500/40 backdrop-blur-xl shadow-2xl space-y-4 animate-fade-in text-white"
+        >
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-purple-600/40 shrink-0 ring-4 ring-purple-500/20">
+                <Trophy className="w-8 h-8 text-amber-300" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono uppercase tracking-wider text-purple-300 font-bold">
+                    Test Score Result
+                  </span>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${
+                      scorePercent >= 80
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        : scorePercent >= 50
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                    }`}
+                  >
+                    {scorePercent >= 80 ? 'Mastery Achieved 🌟' : scorePercent >= 50 ? 'Good Effort 👍' : 'Needs Practice 📚'}
+                  </span>
+                </div>
+                <h3 className="text-2xl sm:text-3xl font-black tracking-tight text-white mt-1">
+                  {score} / {totalQuestions}{' '}
+                  <span className="text-lg sm:text-xl font-bold text-purple-300">
+                    ({scorePercent}%)
+                  </span>
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-xl">
+                  {scorePercent >= 80
+                    ? 'Outstanding! You have a solid understanding of these core concepts.'
+                    : scorePercent >= 50
+                    ? 'Solid start! Review the explanations below to master the trickier topics.'
+                    : 'Keep working! Review the correct answers and explanations below to strengthen your fundamentals.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  setReviewIncorrectOnly((v) => !v)
+                  setCurrentIndex(0)
+                }}
+                className={`flex-1 md:flex-none px-4 py-2 rounded-xl text-xs font-bold border transition shadow-sm ${
+                  reviewIncorrectOnly
+                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                }`}
+              >
+                {reviewIncorrectOnly ? 'View All Questions' : 'Review Mistakes Only'}
+              </button>
+              <button
+                type="button"
+                onClick={handleReset}
+                className="flex-1 md:flex-none inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-lg shadow-purple-600/30 transition"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> Retake Drill
+              </button>
+            </div>
+          </div>
+
+          {/* Metrics Pills */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-3 border-t border-purple-500/20 text-xs">
+            <div className="p-3 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between">
+              <span className="text-slate-400">Total Questions</span>
+              <span className="font-mono font-bold text-white">{totalQuestions}</span>
+            </div>
+            <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between">
+              <span className="text-emerald-300">Correct</span>
+              <span className="font-mono font-bold text-emerald-400">{score}</span>
+            </div>
+            <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-between">
+              <span className="text-rose-300">Incorrect</span>
+              <span className="font-mono font-bold text-rose-400">{incorrectCount}</span>
+            </div>
+            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between">
+              <span className="text-amber-300">Unanswered</span>
+              <span className="font-mono font-bold text-amber-400">{unattemptedCount}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Carousel Container */}
       <div className="p-6 sm:p-8 rounded-3xl bg-white/70 dark:bg-slate-900/70 border border-slate-200/80 dark:border-slate-800/80 backdrop-blur-xl shadow-xl space-y-6 relative overflow-hidden">
         {/* Step Indicator Bar */}
         <div className="flex items-center justify-between gap-1 overflow-x-auto pb-2 border-b border-slate-200/60 dark:border-slate-800/60">
-          {displayQuestions.map((_, idx) => {
-            const isAnswered = selectedAnswers[idx] !== undefined
+          {displayQuestions.map((q, idx) => {
+            const isAnswered = selectedAnswers[q.originalIndex] !== undefined
             const isCurrent = idx === safeIndex
-            const isRight = (submitted || instantFeedback) && selectedAnswers[idx] === displayQuestions[idx].correct
+            const isRight = submitted && selectedAnswers[q.originalIndex] === q.correct
+
+            let btnClass = 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+
+            if (isCurrent) {
+              btnClass = 'ring-2 ring-purple-500 ring-offset-2 ring-offset-slate-900 bg-purple-600 text-white'
+            } else if (submitted) {
+              if (isRight) {
+                btnClass = 'bg-emerald-500/20 text-emerald-500 dark:text-emerald-400 border border-emerald-500/40 font-bold'
+              } else if (isAnswered) {
+                btnClass = 'bg-rose-500/20 text-rose-500 dark:text-rose-400 border border-rose-500/40 font-bold'
+              } else {
+                btnClass = 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+              }
+            } else if (isAnswered) {
+              btnClass = 'bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/40 font-semibold'
+            }
 
             return (
               <button
-                key={idx}
+                key={q.originalIndex}
                 type="button"
                 onClick={() => setCurrentIndex(idx)}
-                className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center shrink-0 ${
-                  isCurrent
-                    ? 'ring-2 ring-purple-500 ring-offset-2 ring-offset-slate-900 bg-purple-600 text-white'
-                    : isAnswered
-                    ? isRight
-                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                      : (submitted || instantFeedback)
-                      ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                      : 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-                }`}
+                className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center shrink-0 ${btnClass}`}
+                title={`Question ${idx + 1}`}
               >
                 {idx + 1}
               </button>
@@ -397,10 +510,33 @@ export default function TopicQuiz({ topicId, topicTitle }) {
         {currentQ ? (
           <div className="space-y-4 animate-fade-in">
             <div className="flex items-center justify-between text-xs text-purple-400 font-mono font-bold">
-              <span>QUESTION {safeIndex + 1} OF {displayQuestions.length}</span>
+              <span>
+                QUESTION {safeIndex + 1} OF {displayQuestions.length}
+                {reviewIncorrectOnly && ' (Review Mistakes)'}
+              </span>
               {submitted && (
-                <span className={userSel === currentQ.correct ? 'text-emerald-400' : 'text-rose-400'}>
-                  {userSel === currentQ.correct ? '✓ Correct' : '✗ Incorrect'}
+                <span
+                  className={`flex items-center gap-1 font-semibold ${
+                    userSel === currentQ.correct
+                      ? 'text-emerald-400'
+                      : userSel !== undefined
+                      ? 'text-rose-400'
+                      : 'text-amber-400'
+                  }`}
+                >
+                  {userSel === currentQ.correct ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Correct (+1)
+                    </>
+                  ) : userSel !== undefined ? (
+                    <>
+                      <XCircle className="w-3.5 h-3.5" /> Incorrect
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle className="w-3.5 h-3.5" /> Unanswered
+                    </>
+                  )}
                 </span>
               )}
             </div>
@@ -414,18 +550,24 @@ export default function TopicQuiz({ topicId, topicTitle }) {
               {currentQ.options.map((opt, oIdx) => {
                 const isSelected = userSel === oIdx
                 const isTargetCorrect = oIdx === currentQ.correct
-                const showValidation = submitted || (instantFeedback && isSelected)
 
-                let btnStyle = 'bg-white/60 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-700/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                let btnStyle =
+                  'bg-white/60 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-700/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
 
-                if (showValidation) {
+                if (submitted) {
                   if (isTargetCorrect) {
-                    btnStyle = 'bg-emerald-500/15 border-emerald-500 text-emerald-300 font-semibold ring-1 ring-emerald-500/40'
+                    btnStyle =
+                      'bg-emerald-500/15 border-emerald-500 text-emerald-700 dark:text-emerald-200 font-semibold ring-2 ring-emerald-500/40 shadow-sm'
                   } else if (isSelected && !isTargetCorrect) {
-                    btnStyle = 'bg-rose-500/15 border-rose-500 text-rose-300 font-semibold ring-1 ring-rose-500/40'
+                    btnStyle =
+                      'bg-rose-500/15 border-rose-500 text-rose-700 dark:text-rose-200 font-semibold ring-2 ring-rose-500/40 shadow-sm'
+                  } else {
+                    btnStyle =
+                      'opacity-60 bg-white/40 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400'
                   }
                 } else if (isSelected) {
-                  btnStyle = 'bg-purple-600 text-white font-semibold shadow-md shadow-purple-600/25 border-purple-500'
+                  btnStyle =
+                    'bg-purple-600 text-white font-semibold shadow-md shadow-purple-600/25 border-purple-500'
                 }
 
                 return (
@@ -436,22 +578,44 @@ export default function TopicQuiz({ topicId, topicTitle }) {
                     disabled={submitted}
                     className={`w-full p-3.5 rounded-2xl text-left text-xs sm:text-sm border transition-all duration-200 flex items-start gap-3 ${btnStyle}`}
                   >
-                    <span className="w-5 h-5 rounded-lg border border-current flex items-center justify-center text-[10px] font-mono font-bold shrink-0 mt-0.5">
+                    <span
+                      className={`w-5 h-5 rounded-lg border flex items-center justify-center text-[10px] font-mono font-bold shrink-0 mt-0.5 ${
+                        submitted && isTargetCorrect
+                          ? 'border-emerald-500 bg-emerald-500 text-white'
+                          : submitted && isSelected && !isTargetCorrect
+                          ? 'border-rose-500 bg-rose-500 text-white'
+                          : isSelected
+                          ? 'border-white/50 bg-white/20 text-white'
+                          : 'border-current'
+                      }`}
+                    >
                       {String.fromCharCode(65 + oIdx)}
                     </span>
-                    <span className="leading-relaxed">{opt}</span>
+                    <span className="leading-relaxed flex-1">{opt}</span>
+
+                    {/* Result Badges after submission */}
+                    {submitted && isTargetCorrect && (
+                      <span className="shrink-0 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Correct Answer
+                      </span>
+                    )}
+                    {submitted && isSelected && !isTargetCorrect && (
+                      <span className="shrink-0 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1">
+                        <XCircle className="w-3 h-3" /> Your Choice
+                      </span>
+                    )}
                   </button>
                 )
               })}
             </div>
 
-            {/* Instant Feedback / Post-Submission Explanation */}
-            {(submitted || (instantFeedback && userSel !== undefined)) && currentQ.explanation && (
-              <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-300 space-y-1 animate-fade-in">
-                <span className="font-bold uppercase tracking-wider text-[10px] text-indigo-400 block">
-                  💡 Explanation & Reasoning:
+            {/* Post-Submission Explanation */}
+            {submitted && currentQ.explanation && (
+              <div className="p-4 sm:p-5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-xs sm:text-sm text-indigo-300 space-y-1.5 animate-fade-in">
+                <span className="font-bold uppercase tracking-wider text-[10px] sm:text-xs text-indigo-400 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" /> Explanation & Reasoning:
                 </span>
-                <p className="leading-relaxed text-slate-300">{currentQ.explanation}</p>
+                <p className="leading-relaxed text-slate-300 text-xs sm:text-sm">{currentQ.explanation}</p>
               </div>
             )}
           </div>
@@ -484,21 +648,23 @@ export default function TopicQuiz({ topicId, topicTitle }) {
             {!submitted ? (
               <button
                 type="button"
-                onClick={() => {
-                  setSubmitted(true)
-                  showToast(`Quiz completed! You scored ${score}/${activeQuestionsList.length} (${scorePercent}%)`)
-                }}
+                onClick={handleSubmit}
                 disabled={answeredCount === 0}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-xs font-bold shadow-lg shadow-purple-600/25 transition"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-xs font-bold shadow-lg shadow-purple-600/25 transition cursor-pointer"
               >
                 <Check className="w-4 h-4" />
-                <span>Submit Quiz ({answeredCount}/{activeQuestionsList.length})</span>
+                <span>
+                  Submit Quiz ({answeredCount}/{totalQuestions})
+                </span>
               </button>
             ) : (
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setReviewIncorrectOnly((v) => !v)}
+                  onClick={() => {
+                    setReviewIncorrectOnly((v) => !v)
+                    setCurrentIndex(0)
+                  }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
                     reviewIncorrectOnly
                       ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
@@ -518,38 +684,8 @@ export default function TopicQuiz({ topicId, topicTitle }) {
             )}
           </div>
         </div>
-
-        {/* Score Summary Modal Card when Submitted */}
-        {submitted && (
-          <div className="p-5 rounded-2xl bg-gradient-to-r from-purple-950/60 to-indigo-950/60 border border-purple-500/30 flex flex-col sm:flex-row items-center justify-between gap-4 animate-fade-in">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-purple-600 text-white flex items-center justify-center shadow-lg shadow-purple-600/30 shrink-0">
-                <Trophy className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-white">
-                  Score: {score} / {activeQuestionsList.length} ({scorePercent}%)
-                </h4>
-                <p className="text-xs text-slate-300">
-                  {scorePercent >= 80
-                    ? 'Outstanding! You have strong grasp of this topic.'
-                    : scorePercent >= 50
-                    ? 'Good effort! Review the explanations above to achieve full mastery.'
-                    : 'Keep practicing! Check the flashcards and study notes to reinforce key points.'}
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleReset}
-              className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-md transition shrink-0"
-            >
-              Retake Drill
-            </button>
-          </div>
-        )}
       </div>
     </section>
   )
 }
+
